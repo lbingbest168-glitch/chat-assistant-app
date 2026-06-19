@@ -5,23 +5,25 @@ const path = require("node:path");
 const root = __dirname;
 const port = Number(process.env.PORT || 8787);
 
-const defaultProvider = "openai";
-const provider = (process.env.AI_PROVIDER || defaultProvider).trim().toLowerCase();
+const provider = (process.env.AI_PROVIDER || "openai").trim().toLowerCase();
 const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
 const model = process.env.AI_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
 const providerConfig = {
   openai: {
-    type: "responses",
+    requestType: "responses",
     defaultUrl: "https://api.openai.com/v1/responses",
+    supportsResponseFormat: false,
   },
   qwen: {
-    type: "chat_completions",
+    requestType: "chat_completions",
     defaultUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    supportsResponseFormat: false,
   },
   deepseek: {
-    type: "chat_completions",
+    requestType: "chat_completions",
     defaultUrl: "https://api.deepseek.com/chat/completions",
+    supportsResponseFormat: true,
   },
 };
 
@@ -34,6 +36,14 @@ const mimeTypes = {
   ".svg": "image/svg+xml; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
 };
+
+function logError(message, details = {}) {
+  console.error(`[ai-error] ${message}`, {
+    provider,
+    model,
+    ...details,
+  });
+}
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -49,7 +59,7 @@ function readBody(request) {
     request.on("data", (chunk) => {
       body += chunk;
       if (body.length > 50_000) {
-        reject(new Error("请求内容太长"));
+        reject(new Error("Request body is too large"));
         request.destroy();
       }
     });
@@ -62,7 +72,7 @@ function getProviderConfig() {
   const config = providerConfig[provider];
   if (!config) {
     const supported = Object.keys(providerConfig).join(", ");
-    throw new Error(`不支持的 AI_PROVIDER：${provider}。可用值：${supported}`);
+    throw new Error(`Unsupported AI_PROVIDER: ${provider}. Supported values: ${supported}`);
   }
   return config;
 }
@@ -76,38 +86,39 @@ function getEndpoint(config) {
   }
 
   const trimmed = customUrl.replace(/\/+$/, "");
-  return config.type === "responses"
+  return config.requestType === "responses"
     ? `${trimmed}/responses`
     : `${trimmed}/chat/completions`;
 }
 
 function buildSystemPrompt() {
   return [
-    "你是一个中文聊天回复助手。",
-    "目标是帮用户生成自然、有分寸、像真人写的回复。",
-    "必须遵守：",
-    "1. 只输出 JSON，不要 Markdown。",
-    "2. JSON 格式必须是 {\"replies\":[\"回复1\",\"回复2\",\"回复3\"]}。",
-    "3. 每条回复适合直接发给对方，不要解释写作思路。",
-    "4. 不要替用户承诺现实行动，不要诱导骚扰、操控或欺骗。",
-    "5. 如果用户人设里有边界感，就保持尊重和克制。",
+    "You are a Chinese chat reply assistant.",
+    "Generate natural, respectful, human-like Chinese replies for the user.",
+    "Return JSON only. Do not use Markdown.",
+    "The JSON shape must be exactly: {\"replies\":[\"reply 1\",\"reply 2\",\"reply 3\"]}.",
+    "Each reply should be ready to send directly.",
+    "Do not explain your reasoning.",
+    "Do not make real-world commitments on behalf of the user.",
+    "Avoid harassment, manipulation, deception, or pressure.",
+    "If the persona asks for boundaries, keep the replies respectful and restrained.",
   ].join("\n");
 }
 
 function buildUserPrompt(data) {
   return [
-    `对方消息：${data.incoming || "无"}`,
-    `用户人设：${data.persona || "自然、真诚、有边界"}`,
-    `聊天关系：${data.relationship || "未说明"}`,
-    `禁用表达：${data.avoid || "不要油腻，不要像客服"}`,
-    `语气：${data.tone || "自然"}`,
-    `目的：${data.intent || "继续聊天"}`,
-    `最近聊天摘要：${data.context || "无"}`,
-    `快捷要求：${data.quick || "无"}`,
+    `Incoming message: ${data.incoming || "none"}`,
+    `User persona: ${data.persona || "natural, sincere, and boundaried"}`,
+    `Relationship: ${data.relationship || "not specified"}`,
+    `Avoid expressions: ${data.avoid || "do not sound greasy or like customer service"}`,
+    `Tone: ${data.tone || "natural"}`,
+    `Intent: ${data.intent || "continue the conversation"}`,
+    `Recent context: ${data.context || "none"}`,
+    `Quick instruction: ${data.quick || "none"}`,
   ].join("\n");
 }
 
-function buildOpenAiBody(data) {
+function buildResponsesBody(data) {
   return {
     model,
     input: `${buildSystemPrompt()}\n\n${buildUserPrompt(data)}`,
@@ -115,20 +126,25 @@ function buildOpenAiBody(data) {
   };
 }
 
-function buildChatCompletionsBody(data) {
-  return {
+function buildChatCompletionsBody(data, config) {
+  const body = {
     model,
     messages: [
       { role: "system", content: buildSystemPrompt() },
       { role: "user", content: buildUserPrompt(data) },
     ],
-    response_format: { type: "json_object" },
     temperature: 0.8,
     stream: false,
   };
+
+  if (config.supportsResponseFormat) {
+    body.response_format = { type: "json_object" };
+  }
+
+  return body;
 }
 
-function extractOpenAiText(payload) {
+function extractResponsesText(payload) {
   if (typeof payload.output_text === "string") return payload.output_text;
 
   const chunks = [];
@@ -144,26 +160,37 @@ function extractChatCompletionsText(payload) {
   return payload?.choices?.[0]?.message?.content || "";
 }
 
-function parseReplies(text) {
-  const clean = String(text || "")
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/```$/i, "")
-    .trim();
+function unwrapJsonText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return raw;
 
+  const fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced) return fenced[1].trim();
+
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return raw.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return raw;
+}
+
+function parseReplies(text) {
+  const clean = unwrapJsonText(text);
   if (!clean) {
-    throw new Error("AI 返回内容为空，无法解析候选回复");
+    throw new Error("AI response was empty; cannot parse replies");
   }
 
   let payload;
   try {
     payload = JSON.parse(clean);
   } catch {
-    throw new Error(`AI 返回内容不是有效 JSON：${clean.slice(0, 160)}`);
+    throw new Error(`AI response was not valid JSON. Raw response preview: ${clean.slice(0, 300)}`);
   }
 
   if (!Array.isArray(payload.replies)) {
-    throw new Error("AI 返回 JSON 中缺少 replies 数组");
+    throw new Error(`AI JSON did not include a replies array. Parsed keys: ${Object.keys(payload).join(", ")}`);
   }
 
   const replies = payload.replies
@@ -172,7 +199,7 @@ function parseReplies(text) {
     .slice(0, 5);
 
   if (replies.length === 0) {
-    throw new Error("AI 返回的 replies 数组为空");
+    throw new Error("AI replies array was empty");
   }
 
   return replies;
@@ -180,34 +207,78 @@ function parseReplies(text) {
 
 async function callAiModel(data) {
   if (!apiKey) {
-    throw new Error("后端没有配置 AI_API_KEY");
+    throw new Error("Server is missing AI_API_KEY");
   }
 
   const config = getProviderConfig();
   const endpoint = getEndpoint(config);
-  const body = config.type === "responses"
-    ? buildOpenAiBody(data)
-    : buildChatCompletionsBody(data);
+  const body = config.requestType === "responses"
+    ? buildResponsesBody(data)
+    : buildChatCompletionsBody(data, config);
 
-  const aiResponse = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  console.log("[ai-request]", {
+    provider,
+    model,
+    endpoint,
+    requestType: config.requestType,
+    hasApiKey: Boolean(apiKey),
+    incomingLength: String(data.incoming || "").length,
   });
 
-  const payload = await aiResponse.json().catch(() => ({}));
-  if (!aiResponse.ok) {
-    throw new Error(payload.error?.message || `${provider} 请求失败：HTTP ${aiResponse.status}`);
+  let aiResponse;
+  try {
+    aiResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    logError("Network request to AI provider failed", {
+      endpoint,
+      error: error.message,
+    });
+    throw new Error(`AI provider network request failed: ${error.message}`);
   }
 
-  const text = config.type === "responses"
-    ? extractOpenAiText(payload)
+  const responseText = await aiResponse.text();
+  let payload = {};
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    logError("AI provider returned non-JSON HTTP response", {
+      endpoint,
+      status: aiResponse.status,
+      bodyPreview: responseText.slice(0, 500),
+    });
+    throw new Error(`AI provider returned non-JSON response. HTTP ${aiResponse.status}`);
+  }
+
+  if (!aiResponse.ok) {
+    logError("AI provider returned an error", {
+      endpoint,
+      status: aiResponse.status,
+      bodyPreview: responseText.slice(0, 1000),
+    });
+    throw new Error(payload.error?.message || `AI provider request failed. HTTP ${aiResponse.status}`);
+  }
+
+  const modelText = config.requestType === "responses"
+    ? extractResponsesText(payload)
     : extractChatCompletionsText(payload);
 
-  return parseReplies(text);
+  try {
+    return parseReplies(modelText);
+  } catch (error) {
+    logError("Could not parse AI response into replies", {
+      endpoint,
+      rawModelTextPreview: String(modelText || "").slice(0, 1000),
+      error: error.message,
+    });
+    throw error;
+  }
 }
 
 async function handleReply(request, response) {
@@ -217,8 +288,11 @@ async function handleReply(request, response) {
     const replies = await callAiModel(data);
     sendJson(response, 200, { replies });
   } catch (error) {
+    logError("/api/reply failed", {
+      error: error.message,
+    });
     sendJson(response, 500, {
-      error: error.message || "请求处理失败",
+      error: error.message || "Reply request failed",
     });
   }
 }
@@ -268,9 +342,11 @@ const server = http.createServer((request, response) => {
 
 if (require.main === module) {
   server.listen(port, () => {
+    const config = getProviderConfig();
     console.log(`Echo Keyboard app running at http://127.0.0.1:${port}`);
     console.log(`AI provider: ${provider}`);
     console.log(`AI model: ${model}`);
+    console.log(`AI endpoint: ${getEndpoint(config)}`);
   });
 }
 
