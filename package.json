@@ -1,0 +1,14 @@
+{
+  "name": "echo-keyboard-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A mobile-first AI reply assistant PWA with a multi-provider AI Node server.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check service-worker.js && node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

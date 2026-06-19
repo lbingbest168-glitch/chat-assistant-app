@@ -1,0 +1,17 @@
+{
+  "name": "回声键盘 AI",
+  "short_name": "回声键盘",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "description": "一个手机可用的 AI 聊天回复助手原型，生成后由用户确认发送。",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

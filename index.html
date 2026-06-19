@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101418">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="回声键盘">
+  <title>回声键盘 AI</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="phone-shell" aria-label="AI 聊天回复助手">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI Reply Keyboard</p>
+        <h1>回声键盘</h1>
+      </div>
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="切换明暗主题" title="切换明暗主题">◐</button>
+    </header>
+
+    <section class="tabs" aria-label="功能视图">
+      <button class="tab active" data-view="reply" type="button">回复</button>
+      <button class="tab" data-view="persona" type="button">人设</button>
+      <button class="tab" data-view="auto" type="button">自主聊</button>
+      <button class="tab" data-view="settings" type="button">设置</button>
+    </section>
+
+    <section class="view active" id="replyView">
+      <div class="conversation">
+        <article class="bubble incoming">
+          <span>对方</span>
+          <p id="previewIncoming">今晚有空吗？想约你一起吃饭。</p>
+        </article>
+        <article class="bubble outgoing">
+          <span>你的人设</span>
+          <p id="personaPreview">温柔、有边界、回复自然，不显得太主动。</p>
+        </article>
+      </div>
+
+      <label class="field">
+        <span>粘贴对方消息</span>
+        <textarea id="incomingText" rows="4" placeholder="把微信、短信、社交软件里对方发来的内容粘贴到这里...">今晚有空吗？想约你一起吃饭。</textarea>
+      </label>
+
+      <div class="control-row">
+        <label class="select-field">
+          <span>语气</span>
+          <select id="toneSelect">
+            <option value="自然">自然</option>
+            <option value="温柔">温柔</option>
+            <option value="幽默">幽默</option>
+            <option value="克制">克制</option>
+            <option value="暧昧">暧昧</option>
+          </select>
+        </label>
+        <label class="select-field">
+          <span>目的</span>
+          <select id="intentSelect">
+            <option value="继续聊天">继续聊天</option>
+            <option value="礼貌拒绝">礼貌拒绝</option>
+            <option value="推进邀约">推进邀约</option>
+            <option value="缓和尴尬">缓和尴尬</option>
+            <option value="表达边界">表达边界</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="action-row">
+        <button class="primary" id="generateBtn" type="button">生成回复</button>
+        <button class="secondary" id="clearBtn" type="button">清空</button>
+      </div>
+
+      <section class="suggestions" aria-live="polite">
+        <div class="section-title">
+          <h2>候选回复</h2>
+          <span id="resultCount">3 条</span>
+        </div>
+        <div id="suggestionList" class="suggestion-list"></div>
+      </section>
+    </section>
+
+    <section class="view" id="personaView">
+      <label class="field">
+        <span>你的人设</span>
+        <textarea id="personaText" rows="5">温柔、有边界、回复自然，不显得太主动。</textarea>
+      </label>
+      <label class="field">
+        <span>聊天关系</span>
+        <input id="relationshipInput" type="text" value="刚认识不久，有一点好感">
+      </label>
+      <label class="field">
+        <span>禁用表达</span>
+        <input id="avoidInput" type="text" value="别太油腻，别连续追问，别像客服">
+      </label>
+      <div class="persona-presets">
+        <button class="chip" data-persona="松弛真诚，喜欢短句，不解释太多。">松弛真诚</button>
+        <button class="chip" data-persona="温柔有分寸，会照顾对方情绪，但不讨好。">温柔边界</button>
+        <button class="chip" data-persona="轻松幽默，偶尔玩梗，但不过度表演。">轻松幽默</button>
+      </div>
+    </section>
+
+    <section class="view" id="autoView">
+      <div class="notice">
+        <strong>自主聊天模式</strong>
+        <p>AI 可以根据人设连续生成下一句，但每一句都会停在确认区，必须由你点“确认使用”。</p>
+      </div>
+      <label class="switch-row">
+        <span>开启上下文记忆</span>
+        <input id="memoryToggle" type="checkbox" checked>
+      </label>
+      <label class="switch-row">
+        <span>每次生成前要求确认</span>
+        <input type="checkbox" checked disabled>
+      </label>
+      <label class="field">
+        <span>最近聊天摘要</span>
+        <textarea id="contextText" rows="6" placeholder="可填写最近聊天背景，例如：对方最近工作很忙，我们昨天聊到周末安排。"></textarea>
+      </label>
+      <button class="primary wide" id="autoBtn" type="button">生成下一句</button>
+    </section>
+
+    <section class="view" id="settingsView">
+      <div class="notice">
+        <strong>接入真实 AI</strong>
+        <p>这个原型当前使用本地生成逻辑。正式版可以改成调用 OpenAI、通义、智谱或你自己的后端。</p>
+      </div>
+      <label class="field">
+        <span>API 地址</span>
+        <input id="apiEndpoint" type="text" value="/api/reply" placeholder="https://你的后端域名/api/reply">
+      </label>
+      <div class="notice model-note">
+        <strong>当前后端模型</strong>
+        <p>默认使用 OpenAI `gpt-4.1`。部署时可以通过环境变量 `OPENAI_MODEL` 修改。</p>
+      </div>
+      <label class="field">
+        <span>发送前安全词</span>
+        <input id="safetyWord" type="text" value="确认发送">
+      </label>
+      <div class="integration-list">
+        <div>
+          <b>网页/PWA</b>
+          <span>最快落地，手机浏览器可用。</span>
+        </div>
+        <div>
+          <b>Android 输入法</b>
+          <span>可做悬浮候选栏，适合微信/短信内使用。</span>
+        </div>
+        <div>
+          <b>iOS 键盘扩展</b>
+          <span>可做键盘扩展，但系统限制更多。</span>
+        </div>
+      </div>
+      <div class="notice install-guide">
+        <strong>iPhone 安装到主屏幕</strong>
+        <p>用 Safari 打开部署后的网址，点分享按钮，选择“添加到主屏幕”。之后它会像一个普通 App 一样打开。</p>
+      </div>
+      <button class="primary wide" id="saveSettingsBtn" type="button">保存当前设置</button>
+    </section>
+
+    <aside class="confirm-panel" id="confirmPanel" aria-hidden="true">
+      <div>
+        <span>待确认</span>
+        <p id="chosenReply">选择一条回复后会显示在这里。</p>
+      </div>
+      <div class="confirm-actions">
+        <button class="secondary" id="copyBtn" type="button">复制</button>
+        <button class="primary" id="confirmBtn" type="button">确认使用</button>
+      </div>
+    </aside>
+
+    <nav class="keyboard-bar" aria-label="键盘辅助栏">
+      <button data-quick="帮我委婉一点" type="button">委婉</button>
+      <button data-quick="帮我更短一点" type="button">短句</button>
+      <button data-quick="加一点暧昧感" type="button">暧昧</button>
+      <button data-quick="别让对方尴尬" type="button">救场</button>
+    </nav>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
